@@ -6,3 +6,8 @@ __pycache__/
 # Tableau lock/backup files
 .~*
 *.twbr
+# graphify local state (only the graph outputs are committed)
+graphify-out/cache/
+graphify-out/.graphify_*
+graphify-out/cost.json
+graphify-out/manifest.json
