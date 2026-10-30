@@ -1,0 +1,8 @@
+data/aml.db
+03_tableau/data/*.csv
+__pycache__/
+.ipynb_checkpoints/
+.DS_Store
+# Tableau lock/backup files
+.~*
+*.twbr
