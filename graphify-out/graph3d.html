@@ -4,6 +4,8 @@
 #legend div{display:flex;align-items:center;gap:8px;margin:3px 0;cursor:pointer}
 #legend span{width:12px;height:12px;border-radius:50%;display:inline-block}
 #hint{position:fixed;bottom:12px;left:12px;opacity:.6;z-index:2}</style>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three-spritetext@1.9.4/dist/three-spritetext.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/3d-force-graph@1.73.3/dist/3d-force-graph.min.js"></script></head>
 <body><div id="legend"></div><div id="hint">Drag to rotate · scroll to zoom · right-drag to pan · click a node to focus · click a legend entry to isolate it</div><div id="g"></div>
 <script>
@@ -17,6 +19,10 @@ const Graph = ForceGraph3D()(document.getElementById('g'))
   .graphData(data).backgroundColor('#0b0e14')
   .nodeLabel(n => `<b>${n.label}</b><br>${n.group}<br><i>${n.file}</i>`)
   .nodeColor(n => color(n.group)).nodeVal(n => 1 + (deg[n.id]||0))
+  .nodeThreeObjectExtend(true)  // keep the sphere, add the name above it
+  .nodeThreeObject(n => { const t = new SpriteText(n.label, 3, '#e8eaf0');
+      t.backgroundColor = 'rgba(11,14,20,0.6)'; t.padding = 1; t.borderRadius = 2;
+      t.position.y = 5 + Math.cbrt(1 + (deg[n.id]||0)) * 2; return t; })
   .nodeVisibility(n => !only || n.group === only)
   .linkVisibility(l => !only || (l.source.group === only && l.target.group === only))
   .linkLabel(l => l.rel).linkOpacity(0.35).linkDirectionalParticles(1).linkDirectionalParticleWidth(1.2)
