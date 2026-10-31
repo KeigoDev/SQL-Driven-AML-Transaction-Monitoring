@@ -412,26 +412,26 @@ def dashboard_xml() -> str:
              f"show-title='{'false' if name.startswith('KPI') else 'true'}'>{card(4 if name.startswith('KPI') else 12)}</zone>"
              for i, (name, box) in enumerate(LAYOUT.items(), start=3)]
     next_id = 3 + len(LAYOUT)
-    # band first so it sits behind the label and the filter cards
-    zones.insert(0, f"          <zone {grid(0, HEADER_H, W, BAND_H)} id='{next_id}' type-v2='empty'>"
-                    f"<zone-style><format attr='background-color' value='{BAND}' />"
-                    f"<format attr='border-style' value='none' /></zone-style></zone>")
-    zones.append(f"          <zone {grid(16, FILTER_Y, LABEL_W, FILTER_H)} id='{next_id + 1}' type-v2='text'><formatted-text>"
+    # Tiled zones can't overlap, so the band is a horizontal container holding the label and filter cards.
+    band = [f"            <zone {grid(16, FILTER_Y, LABEL_W, FILTER_H)} id='{next_id + 1}' type-v2='text'><formatted-text>"
                  f"<run bold='true' fontcolor='{VIOLET}' fontname='{FONT_BOLD}' fontsize='14'>FILTERS&#10;</run>"
                  f"<run fontcolor='{MUTED}' fontname='{FONT}' fontsize='9'>Change the charts and the fraud value / cases tiles</run>"
                  f"</formatted-text><zone-style><format attr='border-style' value='none' />"
-                 f"<format attr='padding' value='6' /></zone-style></zone>")
+                 f"<format attr='padding' value='6' /><format attr='margin' value='6' /></zone-style></zone>"]
     x0 = 16 + LABEL_W + 12
     fw = (W - 16 - x0 - (len(FILTERS) - 1) * 12) / len(FILTERS)
     filter_card = (f"<zone-style><format attr='background-color' value='{CARD}' />"
                    f"<format attr='border-style' value='solid' /><format attr='border-width' value='1' />"
-                   f"<format attr='border-color' value='{BAND_BORDER}' /><format attr='margin' value='0' />"
+                   f"<format attr='border-color' value='{BAND_BORDER}' /><format attr='margin' value='6' />"
                    f"<format attr='padding' value='6' /></zone-style>")
     for i, (mart, f, kind) in enumerate(FILTERS):
         mode = "" if kind == "range" else " mode='checkdropdown'"
-        zones.append(f"          <zone {grid(x0 + i * (fw + 12), FILTER_Y, fw, FILTER_H)} id='{next_id + 2 + i}'{mode} "
+        band.append(f"            <zone {grid(x0 + i * (fw + 12), FILTER_Y, fw, FILTER_H)} id='{next_id + 2 + i}'{mode} "
                      f"name={quoteattr(FILTER_SHEET[mart])} param='[{ds_name(mart)}].{filter_field(f, kind)}' "
                      f"show-domain='false' show-null-ctrls='false' type-v2='filter'>{filter_card}</zone>")
+    zones.insert(0, f"          <zone {grid(0, HEADER_H, W, BAND_H)} id='{next_id}' param='horz' type-v2='layout-flow'>\n"
+                    + "\n".join(band) + f"\n            <zone-style><format attr='background-color' value='{BAND}' />"
+                    f"<format attr='border-style' value='none' /><format attr='padding' value='8' /></zone-style>\n          </zone>")
     header = (f"<zone {grid(0, 0, W, HEADER_H)} id='2' type-v2='text'><formatted-text>"
               f"<run fontcolor='#FFFFFF' fontname='{FONT_BOLD}' fontsize='22'>AML Transaction Monitoring&#10;</run>"
               f"<run fontcolor='#C9CEDA' fontname='{FONT}' fontsize='11'>PaySim mobile-money data, 6.3M transactions. "
