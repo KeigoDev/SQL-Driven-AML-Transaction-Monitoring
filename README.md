@@ -95,6 +95,10 @@ python run_all.py --csv ~/Downloads/PS_20174392719_1491204439457_log.csv
 Then open `03_tableau/AML_Fraud_Monitoring.twb`. The workbook stores the full path to
 `03_tableau/data`, so if you move the project, run `python 03_tableau/build_twb.py` again.
 
+For Tableau Public, use `03_tableau/AML_Fraud_Monitoring.twbx` instead. It is the same dashboard
+with the data built in as extracts (Tableau Public won't take live CSV connections), and it opens
+anywhere without the CSVs.
+
 A full run takes a few minutes and the database ends up around 2-3 GB.
 
 ### MySQL Workbench
@@ -122,5 +126,6 @@ From `mart_kpi` after a full run.
 02_sql/run_sql.py                   runs the SQL and exports the CSVs
 03_tableau/build_twb.py             writes the Tableau workbook
 03_tableau/AML_Fraud_Monitoring.twb
+03_tableau/AML_Fraud_Monitoring.twbx    same dashboard with built-in extracts (Tableau Public)
 run_all.py                          runs all three steps
 ```

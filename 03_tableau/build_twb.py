@@ -5,10 +5,15 @@ The workbook stores the full path to the data folder, so run this on the machine
 will open it (run_all.py does that already).
 
     python 03_tableau/build_twb.py
+
+It also writes AML_Fraud_Monitoring.twbx, a packaged copy with the data as built-in extracts
+(.hyper), which is what Tableau Public needs.
 """
 
 from __future__ import annotations
 
+import tempfile
+import zipfile
 from pathlib import Path
 from xml.sax.saxutils import escape, quoteattr
 
@@ -17,10 +22,13 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent
 DATA = HERE / "data"
 OUT = HERE / "AML_Fraud_Monitoring.twb"
+OUT_PACKAGED = HERE / "AML_Fraud_Monitoring.twbx"  # data built in, for Tableau Public
+EXTRACT_DIR = "Data/Extracts"  # where the .hyper files sit inside the .twbx
 
 # colours: navy for structure, red for fraud, violet for the new rules, grey for the old flag
 NAVY, RED, VIOLET, GREY = "#14213D", "#D62839", "#5B4BDB", "#A0A7B4"
 CANVAS, CARD, INK, MUTED, BORDER = "#F3F4F8", "#FFFFFF", "#14213D", "#6B7280", "#DDE1EA"
+BAND, BAND_BORDER = "#ECEAFB", "#C9C3F5"  # lavender filter strip under the header
 FONT = "Tableau Book"
 FONT_BOLD = "Tableau Semibold"
 
@@ -57,6 +65,11 @@ FILTERS = [
     ("mart_hourly", "txn_type", "list"),
     ("mart_rule_performance", "rule_group", "list"),
 ]
+# titles on the filter cards: say what each one changes
+FILTER_TITLES = {
+    "sim_day": "Simulation day", "hour_of_day": "Hour of day",
+    "txn_type": "Transaction type", "rule_group": "Rule group (rule chart)",
+}
 
 
 def ds_name(mart: str) -> str:
@@ -84,8 +97,30 @@ def column_meta(mart: str) -> list[tuple[str, str, str, str]]:
     return cols
 
 
-def datasource_xml(mart: str, caption: str) -> str:
-    conn = f"textscan.{mart.replace('_', '')}"
+def write_hyper(mart: str, path: Path) -> None:
+    """Copy one mart CSV into a Tableau extract (.hyper) with the table Extract.Extract."""
+    from tableauhyperapi import (Connection, CreateMode, HyperProcess, Inserter, SqlType, TableDefinition,
+                                 TableName, Telemetry)
+    sql_type = {"integer": SqlType.big_int(), "real": SqlType.double(), "string": SqlType.text()}
+    cols = column_meta(mart)
+    df = pd.read_csv(DATA / f"{mart}.csv")
+    table = TableDefinition(TableName("Extract", "Extract"),
+                            [TableDefinition.Column(n, sql_type[dt]) for n, dt, _, _ in cols])
+    rows = df[[n for n, *_ in cols]].astype(object).where(df.notna(), None).values.tolist()
+    # log_dir keeps hyperd.log out of the project folder
+    with HyperProcess(Telemetry.DO_NOT_SEND_USAGE_DATA_TO_TABLEAU, parameters={"log_dir": str(path.parent)}) as hyper, \
+            Connection(hyper.endpoint, str(path), CreateMode.CREATE_AND_REPLACE) as con:
+        con.catalog.create_schema("Extract")
+        con.catalog.create_table(table)
+        with Inserter(con, table) as ins:
+            ins.add_rows(rows)
+            ins.execute()
+
+
+def datasource_xml(mart: str, caption: str, extract: bool = False) -> str:
+    """extract=False: live link to the CSV (absolute path). extract=True: the packaged .hyper copy,
+    which Tableau Public requires."""
+    conn = f"{'hyper' if extract else 'textscan'}.{mart.replace('_', '')}"
     cols = column_meta(mart)
     remote_type = {"integer": 20, "real": 5, "string": 129}
     agg = {"integer": "Sum", "real": "Sum", "string": "Count"}
@@ -93,9 +128,10 @@ def datasource_xml(mart: str, caption: str) -> str:
     csv_cols = "\n".join(
         f"            <column datatype='{dt}' name={quoteattr(n)} ordinal='{i}' />"
         for i, (n, dt, _, _) in enumerate(cols))
+    parent = "Extract" if extract else f"{mart}.csv"
     meta = "\n".join(f"""          <metadata-record class='column'>
             <remote-name>{escape(n)}</remote-name><remote-type>{remote_type[dt]}</remote-type>
-            <local-name>[{escape(n)}]</local-name><parent-name>[{mart}.csv]</parent-name>
+            <local-name>[{escape(n)}]</local-name><parent-name>[{parent}]</parent-name>
             <remote-alias>{escape(n)}</remote-alias><ordinal>{i}</ordinal>
             <local-type>{dt}</local-type><aggregation>{agg[dt]}</aggregation><contains-null>true</contains-null>
           </metadata-record>""" for i, (n, dt, _, _) in enumerate(cols))
@@ -111,18 +147,27 @@ def datasource_xml(mart: str, caption: str) -> str:
         col_defs.append(f"{head}><aliases>{aliases}</aliases></column>" if aliases else f"{head} />")
     col_defs = "\n".join(col_defs)
 
+    if extract:
+        source = (f"<connection authentication='auth-none' author-locale='en_US' class='hyper' "
+                  f"dbname='{EXTRACT_DIR}/{mart}.hyper' default-settings='yes' port='' sslmode='' "
+                  f"username='tableau_internal_user' />")
+        relation = f"<relation connection='{conn}' name='Extract' table='[Extract].[Extract]' type='table' />"
+    else:
+        source = (f"<connection class='textscan' directory={quoteattr(str(DATA))} filename='{mart}.csv' "
+                  f"password='' server='' />")
+        relation = f"""<relation connection='{conn}' name='{mart}.csv' table='[{mart}#csv]' type='table'>
+          <columns character-set='UTF-8' header='yes' locale='en_US' separator=','>
+{csv_cols}
+          </columns>
+        </relation>"""
     return f"""    <datasource caption={quoteattr(caption)} inline='true' name='{ds_name(mart)}' version='18.1'>
       <connection class='federated'>
         <named-connections>
           <named-connection caption='{mart}' name='{conn}'>
-            <connection class='textscan' directory={quoteattr(str(DATA))} filename='{mart}.csv' password='' server='' />
+            {source}
           </named-connection>
         </named-connections>
-        <relation connection='{conn}' name='{mart}.csv' table='[{mart}#csv]' type='table'>
-          <columns character-set='UTF-8' header='yes' locale='en_US' separator=','>
-{csv_cols}
-          </columns>
-        </relation>
+        {relation}
         <metadata-records>
 {meta}
         </metadata-records>
@@ -198,6 +243,20 @@ def shared_views_xml() -> str:
     return "  <shared-views>\n" + "\n".join(views) + "\n  </shared-views>"
 
 
+def filter_style(sheet: str) -> str:
+    mine = [(m, f, k) for m, f, k in FILTERS if FILTER_SHEET[m] == sheet]
+    if not mine:
+        return ""
+    titles = "".join(
+        f"<format attr='title' field='[{ds_name(m)}].{filter_field(f, k)}' value={quoteattr(FILTER_TITLES[f])}>"
+        f"<formatted-text><run bold='true' fontcolor='{VIOLET}' fontname='{FONT_BOLD}' fontsize='10'>"
+        f"{escape(FILTER_TITLES[f].upper())}</run></formatted-text></format>" for m, f, k in mine)
+    return (f"<style-rule element='quick-filter'>{titles}<format attr='background-color' value='{CARD}' />"
+            f"<format attr='font-size' value='10' /><format attr='color' value='{INK}' /></style-rule>"
+            f"<style-rule element='quick-filter-title'><format attr='font-family' value='{FONT_BOLD}' />"
+            f"<format attr='font-size' value='10' /><format attr='color' value='{VIOLET}' /></style-rule>")
+
+
 def worksheet(name: str, title: str, mart: str, *, mark: str, rows=(), cols=(), color=None,
               color_value=None, text=None, kpi_color=None, subtitle="", labels=False, sort=None,
               widths=None, hide_axis=None) -> str:
@@ -265,7 +324,7 @@ def worksheet(name: str, title: str, mart: str, *, mark: str, rows=(), cols=(), 
           <style-rule element='label'><format attr='font-size' value='10' /><format attr='color' value='{INK}' /></style-rule>
           <style-rule element='cell'><format attr='text-align' value='{'center' if kpi_color else 'left'}' />{
             "<format attr='width' value='96' />" if is_table else ""}</style-rule>
-          <style-rule element='gridline'><format attr='line-visibility' value='off' /></style-rule>
+          <style-rule element='gridline'><format attr='line-visibility' value='off' /></style-rule>{filter_style(name)}
           <style-rule element='zeroline'><format attr='line-visibility' value='off' /></style-rule>
           <style-rule element='table'><format attr='show-null-value-warning' value='false' /></style-rule>
         </style>
@@ -327,10 +386,10 @@ SHEETS = [
 W, H = 1400, 900
 SIZE_W, SIZE_H = 1600, 1000  # actual dashboard size; the layout above scales to it
 _kw = (W - 32 - 4 * 12) / 5
-HEADER_H, FILTER_Y, FILTER_H = 72, 80, 56
+HEADER_H, BAND_H, FILTER_Y, FILTER_H, LABEL_W = 72, 84, 80, 68, 132
 LAYOUT = {  # name: (x, y, w, h)
-    **{s["name"]: (16 + i * (_kw + 12), 144, _kw, 100) for i, s in enumerate(SHEETS[:5])},
-    "Fraud Trend": (16, 256, 752, 260), "Rule Performance": (780, 256, 604, 260),
+    **{s["name"]: (16 + i * (_kw + 12), 164, _kw, 88) for i, s in enumerate(SHEETS[:5])},
+    "Fraud Trend": (16, 264, 752, 252), "Rule Performance": (780, 264, 604, 252),
     "Fraud by Hour": (16, 528, 380, 356), "Fraud by Type": (408, 528, 360, 168),
     "Data Quality": (408, 708, 360, 176), "Alert Queue": (780, 528, 604, 356),
 }
@@ -352,13 +411,27 @@ def dashboard_xml() -> str:
     zones = [f"          <zone {grid(*box)} id='{i}' name={quoteattr(name)} "
              f"show-title='{'false' if name.startswith('KPI') else 'true'}'>{card(4 if name.startswith('KPI') else 12)}</zone>"
              for i, (name, box) in enumerate(LAYOUT.items(), start=3)]
-    fw = (W - 32 - (len(FILTERS) - 1) * 12) / len(FILTERS)
     next_id = 3 + len(LAYOUT)
+    # band first so it sits behind the label and the filter cards
+    zones.insert(0, f"          <zone {grid(0, HEADER_H, W, BAND_H)} id='{next_id}' type-v2='empty'>"
+                    f"<zone-style><format attr='background-color' value='{BAND}' />"
+                    f"<format attr='border-style' value='none' /></zone-style></zone>")
+    zones.append(f"          <zone {grid(16, FILTER_Y, LABEL_W, FILTER_H)} id='{next_id + 1}' type-v2='text'><formatted-text>"
+                 f"<run bold='true' fontcolor='{VIOLET}' fontname='{FONT_BOLD}' fontsize='14'>FILTERS&#10;</run>"
+                 f"<run fontcolor='{MUTED}' fontname='{FONT}' fontsize='9'>Change the charts and the fraud value / cases tiles</run>"
+                 f"</formatted-text><zone-style><format attr='border-style' value='none' />"
+                 f"<format attr='padding' value='6' /></zone-style></zone>")
+    x0 = 16 + LABEL_W + 12
+    fw = (W - 16 - x0 - (len(FILTERS) - 1) * 12) / len(FILTERS)
+    filter_card = (f"<zone-style><format attr='background-color' value='{CARD}' />"
+                   f"<format attr='border-style' value='solid' /><format attr='border-width' value='1' />"
+                   f"<format attr='border-color' value='{BAND_BORDER}' /><format attr='margin' value='0' />"
+                   f"<format attr='padding' value='6' /></zone-style>")
     for i, (mart, f, kind) in enumerate(FILTERS):
         mode = "" if kind == "range" else " mode='checkdropdown'"
-        zones.append(f"          <zone {grid(16 + i * (fw + 12), FILTER_Y, fw, FILTER_H)} id='{next_id + i}'{mode} "
+        zones.append(f"          <zone {grid(x0 + i * (fw + 12), FILTER_Y, fw, FILTER_H)} id='{next_id + 2 + i}'{mode} "
                      f"name={quoteattr(FILTER_SHEET[mart])} param='[{ds_name(mart)}].{filter_field(f, kind)}' "
-                     f"show-domain='false' show-null-ctrls='false' type-v2='filter'>{card(4)}</zone>")
+                     f"show-domain='false' show-null-ctrls='false' type-v2='filter'>{filter_card}</zone>")
     header = (f"<zone {grid(0, 0, W, HEADER_H)} id='2' type-v2='text'><formatted-text>"
               f"<run fontcolor='#FFFFFF' fontname='{FONT_BOLD}' fontsize='22'>AML Transaction Monitoring&#10;</run>"
               f"<run fontcolor='#C9CEDA' fontname='{FONT}' fontsize='11'>PaySim mobile-money data, 6.3M transactions. "
@@ -396,14 +469,27 @@ def main() -> None:
     viewpoints = "".join(
         f"<viewpoint name={quoteattr(s['name'])}><zoom type='{'fit-width' if s['name'] in FIT_WIDTH else 'entire-view'}' />"
         f"</viewpoint>" for s in SHEETS)
-    xml = f"""<?xml version='1.0' encoding='utf-8' ?>
+    OUT.write_text(workbook_xml(marts, windows, viewpoints, extract=False), encoding="utf-8")
+    print(f"[tableau] wrote {OUT}\n[tableau] data folder: {DATA}")
+
+    # packaged copy: same workbook, but each data source reads a .hyper extract stored inside the zip
+    with tempfile.TemporaryDirectory() as tmp, zipfile.ZipFile(OUT_PACKAGED, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(OUT.name, workbook_xml(marts, windows, viewpoints, extract=True))
+        for m in marts:
+            write_hyper(m, Path(tmp) / f"{m}.hyper")
+            z.write(Path(tmp) / f"{m}.hyper", f"{EXTRACT_DIR}/{m}.hyper")
+    print(f"[tableau] wrote {OUT_PACKAGED} (extracts built in, opens in Tableau Public)")
+
+
+def workbook_xml(marts: dict, windows: str, viewpoints: str, extract: bool) -> str:
+    return f"""<?xml version='1.0' encoding='utf-8' ?>
 <workbook original-version='18.1' source-build='2023.1.0 (20231.23.0310.1045)' source-platform='mac' version='18.1' xmlns:user='http://www.tableausoftware.com/xml/user'>
   <preferences>
     <preference name='ui.encoding.shelf.height' value='24' />
     <preference name='ui.shelf.height' value='26' />
   </preferences>
   <datasources>
-{chr(10).join(datasource_xml(m, c) for m, c in marts.items())}
+{chr(10).join(datasource_xml(m, c, extract) for m, c in marts.items())}
   </datasources>
 {shared_views_xml()}
   <worksheets>
@@ -421,8 +507,6 @@ def main() -> None:
   </windows>
 </workbook>
 """
-    OUT.write_text(xml, encoding="utf-8")
-    print(f"[tableau] wrote {OUT}\n[tableau] data folder: {DATA}")
 
 
 if __name__ == "__main__":

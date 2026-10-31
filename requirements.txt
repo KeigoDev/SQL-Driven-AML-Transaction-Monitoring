@@ -1,3 +1,4 @@
 pandas>=2.0
 kagglehub>=0.2      # only needed for the automatic Kaggle download
 jupyter             # only needed to open the SQL notebook
+tableauhyperapi     # builds the .twbx extracts for Tableau Public
