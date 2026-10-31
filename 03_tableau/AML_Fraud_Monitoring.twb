@@ -103,6 +103,7 @@
           </metadata-record>
         </metadata-records>
       </connection>
+      <aliases enabled='yes' />
       <column caption="Raw Rows" datatype='integer' name='[raw_rows]' role='measure' type='quantitative' />
       <column caption="Rows Removed" datatype='integer' name='[rows_removed]' role='measure' type='quantitative' />
       <column caption="Exact Duplicates Removed" datatype='integer' name='[exact_duplicates_removed]' role='measure' type='quantitative' />
@@ -166,9 +167,10 @@
           </metadata-record>
         </metadata-records>
       </connection>
+      <aliases enabled='yes' />
       <column caption="Day" datatype='integer' name='[sim_day]' role='dimension' type='ordinal' />
       <column caption="Hour of day" datatype='integer' name='[hour_of_day]' role='dimension' type='ordinal' />
-      <column caption="Type" datatype='string' name='[txn_type]' role='dimension' type='nominal' />
+      <column caption="Type" datatype='string' name='[txn_type]' role='dimension' type='nominal'><aliases><alias key='"CASH_IN"' value="CASH IN" /><alias key='"CASH_OUT"' value="CASH OUT" /></aliases></column>
       <column caption="Fraud cases" datatype='integer' name='[fraud_count]' role='measure' type='quantitative' default-format="n#,##0" />
       <column caption="Fraud value" datatype='real' name='[fraud_amount]' role='measure' type='quantitative' default-format='*"$"#,##0,,"M"' />
 
@@ -257,8 +259,9 @@
           </metadata-record>
         </metadata-records>
       </connection>
+      <aliases enabled='yes' />
       <column caption="Rule" datatype='string' name='[rule_name]' role='dimension' type='nominal' />
-      <column caption="Group" datatype='string' name='[rule_group]' role='dimension' type='nominal' />
+      <column caption="Rule group" datatype='string' name='[rule_group]' role='dimension' type='nominal' />
       <column caption="Alerts" datatype='integer' name='[alerts]' role='measure' type='quantitative' />
       <column caption="True Positives" datatype='integer' name='[true_positives]' role='measure' type='quantitative' />
       <column caption="False Positives" datatype='integer' name='[false_positives]' role='measure' type='quantitative' />
@@ -341,6 +344,7 @@
           </metadata-record>
         </metadata-records>
       </connection>
+      <aliases enabled='yes' />
       <column caption="#" datatype='integer' name='[queue_rank]' role='dimension' type='ordinal' />
       <column caption="Txn Id" datatype='integer' name='[txn_id]' role='dimension' type='ordinal' />
       <column caption="Type" datatype='string' name='[txn_type]' role='dimension' type='nominal' />
@@ -393,21 +397,46 @@
           </metadata-record>
         </metadata-records>
       </connection>
-      <column caption="Check" datatype='string' name='[dq_issue]' role='dimension' type='nominal' />
+      <aliases enabled='yes' />
+      <column caption="Check" datatype='string' name='[dq_issue]' role='dimension' type='nominal'><aliases><alias key='"DEST_LEDGER_GAP &gt; 1"' value="DEST LEDGER GAP &gt; 1" /><alias key='"NEAR_DUPLICATE"' value="NEAR DUPLICATE" /><alias key='"NON_POSITIVE_AMOUNT"' value="NON POSITIVE AMOUNT" /><alias key='"ORIG_LEDGER_GAP &gt; 1"' value="ORIG LEDGER GAP &gt; 1" /></aliases></column>
       <column caption="Action" datatype='string' name='[action]' role='dimension' type='nominal' />
       <column caption="Rows" datatype='integer' name='[row_count]' role='measure' type='quantitative' default-format="n#,##0" />
 
     </datasource>
   </datasources>
+  <shared-views>
+    <shared-view name='federated.marthourly'>
+      <datasources><datasource caption='mart_hourly' name='federated.marthourly' /></datasources>
+      <datasource-dependencies datasource='federated.marthourly'>
+        <column caption="Day" datatype='integer' name='[sim_day]' role='dimension' type='ordinal' />
+        <column-instance column='[sim_day]' derivation='None' name='[none:sim_day:qk]' pivot='key' type='quantitative' />
+        <column caption="Hour of day" datatype='integer' name='[hour_of_day]' role='dimension' type='ordinal' />
+        <column-instance column='[hour_of_day]' derivation='None' name='[none:hour_of_day:qk]' pivot='key' type='quantitative' />
+        <column caption="Type" datatype='string' name='[txn_type]' role='dimension' type='nominal' />
+        <column-instance column='[txn_type]' derivation='None' name='[none:txn_type:nk]' pivot='key' type='nominal' />
+      </datasource-dependencies>
+      <filter class='quantitative' column='[federated.marthourly].[none:sim_day:qk]' included-values='in-range'><min>1</min><max>31</max></filter>
+      <filter class='quantitative' column='[federated.marthourly].[none:hour_of_day:qk]' included-values='in-range'><min>0</min><max>23</max></filter>
+      <filter class='categorical' column='[federated.marthourly].[none:txn_type:nk]'><groupfilter function='level-members' level='[none:txn_type:nk]' user:ui-enumeration='all' user:ui-marker='enumerate' /><target field='[federated.marthourly].[none:txn_type:nk]' /></filter>
+    </shared-view>
+    <shared-view name='federated.martruleperformance'>
+      <datasources><datasource caption='mart_rule_performance' name='federated.martruleperformance' /></datasources>
+      <datasource-dependencies datasource='federated.martruleperformance'>
+        <column caption="Rule group" datatype='string' name='[rule_group]' role='dimension' type='nominal' />
+        <column-instance column='[rule_group]' derivation='None' name='[none:rule_group:nk]' pivot='key' type='nominal' />
+      </datasource-dependencies>
+      <filter class='categorical' column='[federated.martruleperformance].[none:rule_group:nk]'><groupfilter function='level-members' level='[none:rule_group:nk]' user:ui-enumeration='all' user:ui-marker='enumerate' /><target field='[federated.martruleperformance].[none:rule_group:nk]' /></filter>
+    </shared-view>
+  </shared-views>
   <worksheets>
     <worksheet name="KPI Fraud Value">
       <layout-options>
-        <title><formatted-text><run fontcolor='#14213D' fontname='Tableau Semibold' fontsize='14'>Fraud value</run><run fontcolor='#6B7280' fontname='Tableau Book' fontsize='10'>&#10;confirmed fraud, all 30 days</run></formatted-text></title>
+        <title><formatted-text><run fontcolor='#14213D' fontname='Tableau Semibold' fontsize='14'>Fraud value</run><run fontcolor='#6B7280' fontname='Tableau Book' fontsize='10'>&#10;confirmed fraud, current filters</run></formatted-text></title>
       </layout-options>
       <table>
         <view>
-          <datasources><datasource caption='mart_kpi' name='federated.martkpi' /></datasources>
-          <datasource-dependencies datasource='federated.martkpi'>
+          <datasources><datasource caption='mart_hourly' name='federated.marthourly' /></datasources>
+          <datasource-dependencies datasource='federated.marthourly'>
             <column datatype='real' name='[fraud_amount]' role='measure' type='quantitative' default-format='*"$"#,##0,,"M"' />
             <column-instance column='[fraud_amount]' derivation='Sum' name='[sum:fraud_amount:qk]' pivot='key' type='quantitative' />
           </datasource-dependencies>
@@ -437,8 +466,8 @@
           <pane selection-relaxation-option='selection-relaxation-allow'>
             <view><breakdown value='auto' /></view>
             <mark class='Text' />
-            <encodings><text column='[federated.martkpi].[sum:fraud_amount:qk]' /></encodings>
-            <customized-label><formatted-text><run fontcolor='#6B7280' fontname='Tableau Semibold' fontsize='11'>FRAUD VALUE&#10;</run><run bold='true' fontcolor='#D62839' fontname='Tableau Semibold' fontsize='26'>&lt;[federated.martkpi].[sum:fraud_amount:qk]&gt;</run><run fontcolor='#6B7280' fontname='Tableau Book' fontsize='10'>&#10;confirmed fraud, all 30 days</run></formatted-text></customized-label>
+            <encodings><text column='[federated.marthourly].[sum:fraud_amount:qk]' /></encodings>
+            <customized-label><formatted-text><run fontcolor='#6B7280' fontname='Tableau Semibold' fontsize='11'>FRAUD VALUE&#10;</run><run bold='true' fontcolor='#D62839' fontname='Tableau Semibold' fontsize='26'>&lt;[federated.marthourly].[sum:fraud_amount:qk]&gt;</run><run fontcolor='#6B7280' fontname='Tableau Book' fontsize='10'>&#10;confirmed fraud, current filters</run></formatted-text></customized-label>
             <style><style-rule element='mark'><format attr='mark-labels-show' value='true' /></style-rule></style>
           </pane>
         </panes>
@@ -448,12 +477,12 @@
     </worksheet>
     <worksheet name="KPI Fraud Cases">
       <layout-options>
-        <title><formatted-text><run fontcolor='#14213D' fontname='Tableau Semibold' fontsize='14'>Fraud cases</run><run fontcolor='#6B7280' fontname='Tableau Book' fontsize='10'>&#10;labelled fraud transactions</run></formatted-text></title>
+        <title><formatted-text><run fontcolor='#14213D' fontname='Tableau Semibold' fontsize='14'>Fraud cases</run><run fontcolor='#6B7280' fontname='Tableau Book' fontsize='10'>&#10;labelled fraud, current filters</run></formatted-text></title>
       </layout-options>
       <table>
         <view>
-          <datasources><datasource caption='mart_kpi' name='federated.martkpi' /></datasources>
-          <datasource-dependencies datasource='federated.martkpi'>
+          <datasources><datasource caption='mart_hourly' name='federated.marthourly' /></datasources>
+          <datasource-dependencies datasource='federated.marthourly'>
             <column datatype='integer' name='[fraud_count]' role='measure' type='quantitative' default-format="n#,##0" />
             <column-instance column='[fraud_count]' derivation='Sum' name='[sum:fraud_count:qk]' pivot='key' type='quantitative' />
           </datasource-dependencies>
@@ -483,8 +512,8 @@
           <pane selection-relaxation-option='selection-relaxation-allow'>
             <view><breakdown value='auto' /></view>
             <mark class='Text' />
-            <encodings><text column='[federated.martkpi].[sum:fraud_count:qk]' /></encodings>
-            <customized-label><formatted-text><run fontcolor='#6B7280' fontname='Tableau Semibold' fontsize='11'>FRAUD CASES&#10;</run><run bold='true' fontcolor='#D62839' fontname='Tableau Semibold' fontsize='26'>&lt;[federated.martkpi].[sum:fraud_count:qk]&gt;</run><run fontcolor='#6B7280' fontname='Tableau Book' fontsize='10'>&#10;labelled fraud transactions</run></formatted-text></customized-label>
+            <encodings><text column='[federated.marthourly].[sum:fraud_count:qk]' /></encodings>
+            <customized-label><formatted-text><run fontcolor='#6B7280' fontname='Tableau Semibold' fontsize='11'>FRAUD CASES&#10;</run><run bold='true' fontcolor='#D62839' fontname='Tableau Semibold' fontsize='26'>&lt;[federated.marthourly].[sum:fraud_count:qk]&gt;</run><run fontcolor='#6B7280' fontname='Tableau Book' fontsize='10'>&#10;labelled fraud, current filters</run></formatted-text></customized-label>
             <style><style-rule element='mark'><format attr='mark-labels-show' value='true' /></style-rule></style>
           </pane>
         </panes>
@@ -778,7 +807,7 @@
     </worksheet>
     <worksheet name="Fraud by Type">
       <layout-options>
-        <title><formatted-text><run fontcolor='#14213D' fontname='Tableau Semibold' fontsize='14'>Fraud value by type</run><run fontcolor='#6B7280' fontname='Tableau Book' fontsize='10'>&#10;only TRANSFER and CASH_OUT have fraud</run></formatted-text></title>
+        <title><formatted-text><run fontcolor='#14213D' fontname='Tableau Semibold' fontsize='14'>Fraud value by type</run><run fontcolor='#6B7280' fontname='Tableau Book' fontsize='10'>&#10;only TRANSFER and CASH OUT have fraud</run></formatted-text></title>
       </layout-options>
       <table>
         <view>
@@ -937,18 +966,22 @@
       <size maxheight='1000' maxwidth='1600' minheight='1000' minwidth='1600' />
       <zones>
         <zone h='100000' id='1' type-v2='layout-basic' w='100000' x='0' y='0'>
-          <zone x='0' y='0' w='100000' h='9778' id='2' type-v2='text'><formatted-text><run fontcolor='#FFFFFF' fontname='Tableau Semibold' fontsize='22'>AML Transaction Monitoring&#10;</run><run fontcolor='#C9CEDA' fontname='Tableau Book' fontsize='11'>PaySim mobile-money data, 6.3M transactions. Can a few explainable SQL rules beat a flag that misses almost all fraud?</run></formatted-text><zone-style><format attr='background-color' value='#14213D' /><format attr='border-style' value='none' /><format attr='padding' value='10' /></zone-style></zone>
-          <zone x='1143' y='11111' w='18857' h='12000' id='3' name="KPI Fraud Value" show-title='false'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='4' /></zone-style></zone>
-          <zone x='20857' y='11111' w='18857' h='12000' id='4' name="KPI Fraud Cases" show-title='false'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='4' /></zone-style></zone>
-          <zone x='40571' y='11111' w='18857' h='12000' id='5' name="KPI Legacy Recall" show-title='false'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='4' /></zone-style></zone>
-          <zone x='60286' y='11111' w='18857' h='12000' id='6' name="KPI Model Recall" show-title='false'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='4' /></zone-style></zone>
-          <zone x='80000' y='11111' w='18857' h='12000' id='7' name="KPI Model Precision" show-title='false'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='4' /></zone-style></zone>
-          <zone x='1143' y='24444' w='53714' h='31111' id='8' name="Fraud Trend" show-title='true'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='12' /></zone-style></zone>
-          <zone x='55714' y='24444' w='43143' h='31111' id='9' name="Rule Performance" show-title='true'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='12' /></zone-style></zone>
-          <zone x='1143' y='56889' w='27143' h='41333' id='10' name="Fraud by Hour" show-title='true'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='12' /></zone-style></zone>
-          <zone x='29143' y='56889' w='25714' h='19556' id='11' name="Fraud by Type" show-title='true'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='12' /></zone-style></zone>
-          <zone x='29143' y='77778' w='25714' h='20444' id='12' name="Data Quality" show-title='true'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='12' /></zone-style></zone>
-          <zone x='55714' y='56889' w='43143' h='41333' id='13' name="Alert Queue" show-title='true'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='12' /></zone-style></zone>
+          <zone x='0' y='0' w='100000' h='8000' id='2' type-v2='text'><formatted-text><run fontcolor='#FFFFFF' fontname='Tableau Semibold' fontsize='22'>AML Transaction Monitoring&#10;</run><run fontcolor='#C9CEDA' fontname='Tableau Book' fontsize='11'>PaySim mobile-money data, 6.3M transactions. Can a few explainable SQL rules beat a flag that misses almost all fraud?</run></formatted-text><zone-style><format attr='background-color' value='#14213D' /><format attr='border-style' value='none' /><format attr='padding' value='10' /></zone-style></zone>
+          <zone x='1143' y='16000' w='18857' h='11111' id='3' name="KPI Fraud Value" show-title='false'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='4' /></zone-style></zone>
+          <zone x='20857' y='16000' w='18857' h='11111' id='4' name="KPI Fraud Cases" show-title='false'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='4' /></zone-style></zone>
+          <zone x='40571' y='16000' w='18857' h='11111' id='5' name="KPI Legacy Recall" show-title='false'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='4' /></zone-style></zone>
+          <zone x='60286' y='16000' w='18857' h='11111' id='6' name="KPI Model Recall" show-title='false'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='4' /></zone-style></zone>
+          <zone x='80000' y='16000' w='18857' h='11111' id='7' name="KPI Model Precision" show-title='false'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='4' /></zone-style></zone>
+          <zone x='1143' y='28444' w='53714' h='28889' id='8' name="Fraud Trend" show-title='true'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='12' /></zone-style></zone>
+          <zone x='55714' y='28444' w='43143' h='28889' id='9' name="Rule Performance" show-title='true'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='12' /></zone-style></zone>
+          <zone x='1143' y='58667' w='27143' h='39556' id='10' name="Fraud by Hour" show-title='true'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='12' /></zone-style></zone>
+          <zone x='29143' y='58667' w='25714' h='18667' id='11' name="Fraud by Type" show-title='true'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='12' /></zone-style></zone>
+          <zone x='29143' y='78667' w='25714' h='19556' id='12' name="Data Quality" show-title='true'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='12' /></zone-style></zone>
+          <zone x='55714' y='58667' w='43143' h='39556' id='13' name="Alert Queue" show-title='true'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='12' /></zone-style></zone>
+          <zone x='1143' y='8889' w='23786' h='6222' id='14' name="Fraud Trend" param='[federated.marthourly].[none:sim_day:qk]' show-domain='false' show-null-ctrls='false' type-v2='filter'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='4' /></zone-style></zone>
+          <zone x='25786' y='8889' w='23786' h='6222' id='15' name="Fraud Trend" param='[federated.marthourly].[none:hour_of_day:qk]' show-domain='false' show-null-ctrls='false' type-v2='filter'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='4' /></zone-style></zone>
+          <zone x='50429' y='8889' w='23786' h='6222' id='16' mode='checkdropdown' name="Fraud Trend" param='[federated.marthourly].[none:txn_type:nk]' show-domain='false' show-null-ctrls='false' type-v2='filter'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='4' /></zone-style></zone>
+          <zone x='75071' y='8889' w='23786' h='6222' id='17' mode='checkdropdown' name="Rule Performance" param='[federated.martruleperformance].[none:rule_group:nk]' show-domain='false' show-null-ctrls='false' type-v2='filter'><zone-style><format attr='background-color' value='#FFFFFF' /><format attr='border-style' value='solid' /><format attr='border-width' value='1' /><format attr='border-color' value='#DDE1EA' /><format attr='margin' value='0' /><format attr='padding' value='4' /></zone-style></zone>
         </zone>
       </zones>
     </dashboard>

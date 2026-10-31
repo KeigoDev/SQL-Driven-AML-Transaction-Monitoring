@@ -37,7 +37,7 @@ FORMATS = {
 # names shown on axes and headers
 CAPTIONS = {
     "fraud_amount": "Fraud value", "fraud_count": "Fraud cases", "sim_day": "Day", "hour_of_day": "Hour of day",
-    "txn_type": "Type", "recall_rate": "Recall", "rule_name": "Rule", "rule_group": "Group",
+    "txn_type": "Type", "recall_rate": "Recall", "rule_name": "Rule", "rule_group": "Rule group",
     "dq_issue": "Check", "action": "Action", "row_count": "Rows", "queue_rank": "#", "risk_score": "Score",
     "alert_reasons": "Why it was flagged", "outcome": "Outcome", "amount": "Amount",
 }
@@ -48,6 +48,15 @@ COLOR_MAPS = {
     "mart_rule_performance": ("rule_group", {"Legacy": GREY, "Rule": VIOLET, "Model": RED}),
     "mart_alert_queue": ("outcome", {"Confirmed fraud": RED, "Not fraud": GREY}),
 }
+# dashboard filters as (mart, field, kind). Each one applies to every sheet built on that mart.
+# kind "range" = slider, "list" = multi-select dropdown. The alert queue gets none: its top 100
+# rows are all TRANSFER / score 95 / confirmed fraud, so a filter there would change nothing.
+FILTERS = [
+    ("mart_hourly", "sim_day", "range"),
+    ("mart_hourly", "hour_of_day", "range"),
+    ("mart_hourly", "txn_type", "list"),
+    ("mart_rule_performance", "rule_group", "list"),
+]
 
 
 def ds_name(mart: str) -> str:
@@ -90,11 +99,17 @@ def datasource_xml(mart: str, caption: str) -> str:
             <remote-alias>{escape(n)}</remote-alias><ordinal>{i}</ordinal>
             <local-type>{dt}</local-type><aggregation>{agg[dt]}</aggregation><contains-null>true</contains-null>
           </metadata-record>""" for i, (n, dt, _, _) in enumerate(cols))
-    col_defs = "\n".join(
-        f"      <column caption={quoteattr(CAPTIONS.get(n, n.replace('_', ' ').title()))} datatype='{dt}' "
-        f"name='[{n}]' role='{role}' type='{typ}'"
-        + (f" default-format={quoteattr(fmt(mart, n))}" if fmt(mart, n) else "") + " />"
-        for n, dt, role, typ in cols)
+    df = pd.read_csv(DATA / f"{mart}.csv")
+    col_defs = []
+    for n, dt, role, typ in cols:
+        head = (f"      <column caption={quoteattr(CAPTIONS.get(n, n.replace('_', ' ').title()))} datatype='{dt}' "
+                f"name='[{n}]' role='{role}' type='{typ}'"
+                + (f" default-format={quoteattr(fmt(mart, n))}" if fmt(mart, n) else ""))
+        # show CASH_IN as "CASH IN": a display alias only, the data keeps the SQL value
+        raw = sorted(v for v in df[n].dropna().unique() if "_" in str(v)) if dt == "string" else []
+        aliases = "".join(f"<alias key={quoteattr(chr(34) + v + chr(34))} value={quoteattr(v.replace('_', ' '))} />" for v in raw)
+        col_defs.append(f"{head}><aliases>{aliases}</aliases></column>" if aliases else f"{head} />")
+    col_defs = "\n".join(col_defs)
 
     return f"""    <datasource caption={quoteattr(caption)} inline='true' name='{ds_name(mart)}' version='18.1'>
       <connection class='federated'>
@@ -112,6 +127,7 @@ def datasource_xml(mart: str, caption: str) -> str:
 {meta}
         </metadata-records>
       </connection>
+      <aliases enabled='yes' />
 {col_defs}
 {color_map(mart)}
     </datasource>"""
@@ -143,6 +159,43 @@ def inst(field: str, kind: str) -> tuple[str, str]:
         name = f"[none:{field}:{kind}]"
         xml = f"<column-instance column='[{field}]' derivation='None' name='{name}' pivot='key' type='{typ}' />"
     return name, xml
+
+
+def filter_field(field: str, kind: str) -> str:
+    return f"[none:{field}:{'qk' if kind == 'range' else 'nk'}]"
+
+
+def shared_views_xml() -> str:
+    """Filters stored per data source, so they apply to all sheets using it (same as Tableau's
+    'Apply to all using this data source')."""
+    views = []
+    for mart in dict.fromkeys(m for m, _, _ in FILTERS):
+        ds = ds_name(mart)
+        meta = {n: (dt, role, typ) for n, dt, role, typ in column_meta(mart)}
+        df = pd.read_csv(DATA / f"{mart}.csv")
+        deps, filters = [], []
+        for _, f, kind in (x for x in FILTERS if x[0] == mart):
+            dt, role, typ = meta[f]
+            col, param = filter_field(f, kind), f"[{ds}].{filter_field(f, kind)}"
+            deps.append(f"<column caption={quoteattr(CAPTIONS.get(f, f))} datatype='{dt}' name='[{f}]' "
+                        f"role='{role}' type='{typ}' />")
+            deps.append(f"<column-instance column='[{f}]' derivation='None' name='{col}' pivot='key' "
+                        f"type='{'quantitative' if kind == 'range' else 'nominal'}' />")
+            if kind == "range":
+                filters.append(f"<filter class='quantitative' column='{param}' included-values='in-range'>"
+                               f"<min>{df[f].min()}</min><max>{df[f].max()}</max></filter>")
+            else:
+                filters.append(f"<filter class='categorical' column='{param}'><groupfilter function='level-members' "
+                               f"level='{col}' user:ui-enumeration='all' user:ui-marker='enumerate' />"
+                               f"<target field='{param}' /></filter>")
+        views.append(f"""    <shared-view name='{ds}'>
+      <datasources><datasource caption='{mart}' name='{ds}' /></datasources>
+      <datasource-dependencies datasource='{ds}'>
+        {chr(10).join('        ' + d for d in deps).lstrip()}
+      </datasource-dependencies>
+      {chr(10).join('      ' + x for x in filters).lstrip()}
+    </shared-view>""")
+    return "  <shared-views>\n" + "\n".join(views) + "\n  </shared-views>"
 
 
 def worksheet(name: str, title: str, mart: str, *, mark: str, rows=(), cols=(), color=None,
@@ -232,12 +285,13 @@ def worksheet(name: str, title: str, mart: str, *, mark: str, rows=(), cols=(), 
 
 
 KPI = dict(mart="mart_kpi", mark="Text")
+KPI_FILTERED = dict(KPI, mart="mart_hourly")  # same totals as mart_kpi, but follows the dashboard filters
 SHEETS = [
     # KPI tiles. mart_kpi has one row, so SUM is just the value.
     dict(name="KPI Fraud Value", title="Fraud value", text=("fraud_amount", "sum"), kpi_color=RED,
-         subtitle="confirmed fraud, all 30 days", **KPI),
+         subtitle="confirmed fraud, current filters", **KPI_FILTERED),
     dict(name="KPI Fraud Cases", title="Fraud cases", text=("fraud_count", "sum"), kpi_color=RED,
-         subtitle="labelled fraud transactions", **KPI),
+         subtitle="labelled fraud, current filters", **KPI_FILTERED),
     dict(name="KPI Legacy Recall", title="Old flag recall", text=("legacy_recall", "sum"), kpi_color=GREY,
          subtitle="share of fraud the old flag caught", **KPI),
     dict(name="KPI Model Recall", title="Risk score recall", text=("model_recall", "sum"), kpi_color=VIOLET,
@@ -256,7 +310,7 @@ SHEETS = [
          subtitle="fraud keeps going overnight while normal traffic drops"),
     dict(name="Fraud by Type", title="Fraud value by type", mart="mart_hourly", mark="Bar",
          rows=[("txn_type", "nk")], cols=[("fraud_amount", "sum")], color_value=RED, labels=True,
-         sort=("txn_type", "fraud_amount"), hide_axis="fraud_amount", subtitle="only TRANSFER and CASH_OUT have fraud"),
+         sort=("txn_type", "fraud_amount"), hide_axis="fraud_amount", subtitle="only TRANSFER and CASH OUT have fraud"),
     dict(name="Data Quality", title="What cleaning did", mart="mart_data_quality", mark="Text",
          rows=[("dq_issue", "nk"), ("action", "nk")], text=("row_count", "sum"),
          widths={("dq_issue", "nk"): 160, ("action", "nk"): 116},
@@ -273,12 +327,15 @@ SHEETS = [
 W, H = 1400, 900
 SIZE_W, SIZE_H = 1600, 1000  # actual dashboard size; the layout above scales to it
 _kw = (W - 32 - 4 * 12) / 5
+HEADER_H, FILTER_Y, FILTER_H = 72, 80, 56
 LAYOUT = {  # name: (x, y, w, h)
-    **{s["name"]: (16 + i * (_kw + 12), 100, _kw, 108) for i, s in enumerate(SHEETS[:5])},
-    "Fraud Trend": (16, 220, 752, 280), "Rule Performance": (780, 220, 604, 280),
-    "Fraud by Hour": (16, 512, 380, 372), "Fraud by Type": (408, 512, 360, 176),
-    "Data Quality": (408, 700, 360, 184), "Alert Queue": (780, 512, 604, 372),
+    **{s["name"]: (16 + i * (_kw + 12), 144, _kw, 100) for i, s in enumerate(SHEETS[:5])},
+    "Fraud Trend": (16, 256, 752, 260), "Rule Performance": (780, 256, 604, 260),
+    "Fraud by Hour": (16, 528, 380, 356), "Fraud by Type": (408, 528, 360, 168),
+    "Data Quality": (408, 708, 360, 176), "Alert Queue": (780, 528, 604, 356),
 }
+# a filter zone is attached to one sheet of its mart; the shared view carries it to the rest
+FILTER_SHEET = {"mart_hourly": "Fraud Trend", "mart_rule_performance": "Rule Performance"}
 FIT_WIDTH = {"Alert Queue", "Data Quality"}  # tables scroll down instead of squashing
 
 
@@ -295,7 +352,14 @@ def dashboard_xml() -> str:
     zones = [f"          <zone {grid(*box)} id='{i}' name={quoteattr(name)} "
              f"show-title='{'false' if name.startswith('KPI') else 'true'}'>{card(4 if name.startswith('KPI') else 12)}</zone>"
              for i, (name, box) in enumerate(LAYOUT.items(), start=3)]
-    header = (f"<zone {grid(0, 0, W, 88)} id='2' type-v2='text'><formatted-text>"
+    fw = (W - 32 - (len(FILTERS) - 1) * 12) / len(FILTERS)
+    next_id = 3 + len(LAYOUT)
+    for i, (mart, f, kind) in enumerate(FILTERS):
+        mode = "" if kind == "range" else " mode='checkdropdown'"
+        zones.append(f"          <zone {grid(16 + i * (fw + 12), FILTER_Y, fw, FILTER_H)} id='{next_id + i}'{mode} "
+                     f"name={quoteattr(FILTER_SHEET[mart])} param='[{ds_name(mart)}].{filter_field(f, kind)}' "
+                     f"show-domain='false' show-null-ctrls='false' type-v2='filter'>{card(4)}</zone>")
+    header = (f"<zone {grid(0, 0, W, HEADER_H)} id='2' type-v2='text'><formatted-text>"
               f"<run fontcolor='#FFFFFF' fontname='{FONT_BOLD}' fontsize='22'>AML Transaction Monitoring&#10;</run>"
               f"<run fontcolor='#C9CEDA' fontname='{FONT}' fontsize='11'>PaySim mobile-money data, 6.3M transactions. "
               f"Can a few explainable SQL rules beat a flag that misses almost all fraud?</run></formatted-text>"
@@ -341,6 +405,7 @@ def main() -> None:
   <datasources>
 {chr(10).join(datasource_xml(m, c) for m, c in marts.items())}
   </datasources>
+{shared_views_xml()}
   <worksheets>
 {chr(10).join(worksheet(**s) for s in SHEETS)}
   </worksheets>
